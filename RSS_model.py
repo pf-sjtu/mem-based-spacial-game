@@ -14,13 +14,17 @@ import time
 ## Hyper-parameters
 R, S, T, P = [3, 0, 5, 1] # rewards
 ref0 = 100 # init reference
-num_nei = 2 # number of neighboors
-type_nei = 'v' # r(andom) m(oore) v(on)
+num_nei = 1 # number of neighboors
+type_nei = 'm' # r(andom) m(oore) v(on)
 size_row, size_col = [20, 20] # size of the grid
 d =  0.5 # forgetting rate
 s = 0.25 # activation noise parameter
-num_generation = 1000 #int(20e4) # number of generations in total
-window_size = int(1e4) # number of generations in 1 window
+window_size = int(1e3) # number of generations in 1 window
+window_num = 20
+num_generation = window_size * window_num #int(20e4) # number of generations in total
+#num_generation = 1000 #int(20e4) # number of generations in total
+diff_tol = 1e-3 # asymptotically stable threshold
+
 
 def size_error():
     if type_nei != 'r' and (2*num_nei + 1 > size_row or 2*num_nei + 1 > size_col):
@@ -157,16 +161,37 @@ if __name__ == '__main__':
     verbose = True
     size_error()
     start_time = time.time()
-    for generation in range(num_generation):
-        # part 1, each player acts according to the state of last generation, 125/s
-        generate_state = np.vectorize(Player.act)
-        state = generate_state(players)
-        f_c.append(np.sum(state) / size_row / size_col)
-        #part 2, each player update the reference of chunks according to current state, 8/s
-        update_mem = np.vectorize(Player.update_chunks_ref)
-        update_mem(players)
-        if verbose and generation % 100 == 0:
-            print('Finished Generation: {}, duration: {:.2f}s'.format(generation, time.time() - start_time))
+    fc_table = np.ones([window_num, window_size])
+    for window in range(window_num):
+        for gen in range(window_size):
+            # part 1, each player acts according to the state of last generation, 125/s
+            generate_state = np.vectorize(Player.act)
+            state = generate_state(players)
+            fc_table[window, gen] = np.sum(state) / size_row / size_col
+            #part 2, each player update the reference of chunks according to current state, 8/s
+            update_mem = np.vectorize(Player.update_chunks_ref)
+            update_mem(players)
+            if verbose and gen % 100 == 0:
+                duration = time.time() - start_time
+                expect_time = duration / (window * window_size + gen + 1) * (window_num * window_size)
+                print('Win:{}/{}, Gen:{}/{}, Duration: {:.2f}s/{:.2f}s'.format(\
+                    window + 1, window_num, gen + 1, window_size, duration, expect_time))
+    # plot the f_c
+    fc_mean = fc_table.mean(axis = 1)
+    fc_diff = np.insert(np.diff(fc_mean), 0, 1, axis = 0)
+    fc_dot_color = np.where(fc_diff < diff_tol, 'green', 'red')
+    plt.figure(figsize = (12, 8))
+    plt.plot(range(1, window_num + 1), fc_mean)
+    plt.scatter(range(1, window_num + 1), fc_mean, color = fc_dot_color, s = 50)
+    plt.xlabel('Generation Number(*{})'.format(window_size))
+    plt.ylabel('Cooperation Rate')
+    plt.title('RSS_model(neighbor type:{})'.format(type_nei))
     
-    plt.plot(range(num_generation), f_c)
-    plt.savefig('f_c.png')
+    # find asymptotically stable value (if exists)
+    if 'green' in fc_dot_color:
+        asym_val = np.mean(fc_mean[fc_diff < diff_tol])
+        plt.axhline(y = asym_val, color = 'green', ls="--")
+        plt.title('RSS_model(neighbor type:{}, asymptotically stable value:{:.4f})'.format(type_nei, asym_val))
+    
+    plt.savefig('RSS_fc.png', dpi = 300)
+
