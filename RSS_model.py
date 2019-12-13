@@ -19,7 +19,7 @@ type_nei = 'v' # r(andom) m(oore) v(on)
 size_row, size_col = [10, 10] # size of the grid
 d =  0.5 # forgetting rate
 s = 0.25 # activation noise parameter
-window_size = int(1e2) # number of generations in 1 window
+window_size = int(1e4) # number of generations in 1 window
 window_num = 20
 diff_tol = 1e-3 # asymptotically stable threshold
 
