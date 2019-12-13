@@ -7,28 +7,34 @@ Created on Sun Dec  8 10:43:23 2019
 """
 
 import numpy as np
-#import pandas as pd
 from matplotlib import pyplot as plt
 import time
+
 
 ## Hyper-parameters
 R, S, T, P = [3, 0, 5, 1] # rewards
 ref0 = 100 # init reference
 num_nei = 1 # number of neighboors
-type_nei = 'm' # r(andom) m(oore) v(on)
-size_row, size_col = [20, 20] # size of the grid
+type_nei = 'v' # r(andom) m(oore) v(on)
+size_row, size_col = [10, 10] # size of the grid
 d =  0.5 # forgetting rate
 s = 0.25 # activation noise parameter
-window_size = int(1e3) # number of generations in 1 window
+window_size = int(1e2) # number of generations in 1 window
 window_num = 20
-num_generation = window_size * window_num #int(20e4) # number of generations in total
-#num_generation = 1000 #int(20e4) # number of generations in total
 diff_tol = 1e-3 # asymptotically stable threshold
 
+num_generation = window_size * window_num #int(20e4) # number of generations in total
+sigma = np.sqrt(np.pi * s / np.sqrt(3))
+m_num_nei = num_nei
+v_num_nei = num_nei
 
-def size_error():
-    if type_nei != 'r' and (2*num_nei + 1 > size_row or 2*num_nei + 1 > size_col):
-        print('ERROR in \'get_neighbors\', map size is too small...')
+
+if type_nei != 'r' and (2*num_nei + 1 > size_row or 2*num_nei + 1 > size_col):
+    print('ERROR in \'get_neighbors\', map size is too small...')
+if type_nei == 'm':
+    num_nei = (2 * num_nei + 1) ** 2 - 1
+elif type_nei == 'v':
+    num_nei = 2 * num_nei * (num_nei + 1)
 
 # chunk
 class Chunk():
@@ -47,18 +53,19 @@ chunks = np.array([[Chunk(0, N_config) for N_config in range(num_nei + 1)],
 
 # activations of a declarative chunks
 def B_fun(t1, tn, n, d, s, all_radom = False):
-    memory = np.log(np.power(t1, -d) + 
-                    (n - 1) * (np.power(tn, 1-d) - np.power(t1, 1-d)) 
-                    / (1 - d) / (tn - t1))
+    memory = np.log(np.power(t1, -d) + (n - 1) * (np.power(tn, 1-d) - np.power(t1, 1-d)) / (1 - d) / (tn - t1))
     if all_radom:
-        noise = np.random.randn(2, num_nei + 1) * np.sqrt(np.pi * s / np.sqrt(3))
+        #noise = np.random.randn(2, num_nei + 1) * sigma
+        # may be faster
+        noise = np.random.normal(loc = 0, scale = sigma, size = (2, num_nei + 1))
     else:
-        noise = np.random.randn(1)[0] * np.sqrt(np.pi * s / np.sqrt(3))
+        noise = np.random.randn(1)[0] * sigma
     return memory + noise
 
 # the reference of each chunk
 class Chunks_ref():
     def __init__(self):
+        #print([2, num_nei+1])
         self.n = ref0 * np.ones([2, num_nei+1]) # total number of references
         self.t1 = np.ones([2, num_nei+1]) # time since last reference
         self.tn = ref0 * 2 * num_nei+1 * np.ones([2, num_nei+1]) # time since the fist reference
@@ -67,11 +74,16 @@ class Chunks_ref():
         self.B = B_fun(self.t1, self.tn, self.n, d, s, True)
     # get the position of the most active chunk
     def most_active_chunk(self):
-        mac0_index = np.argmax(self.B[0])
-        mac1_index = np.argmax(self.B[1])
+        #mac0_index = np.argmax(self.B[0])
+        #mac1_index = np.argmax(self.B[1])
+        # may be faster
+        mac0_index, mac1_index = [0, 0]
+        for ii in range(num_nei+1):
+            if self.B[0][ii] > self.B[0][mac0_index]: mac0_index = ii
+            if self.B[1][ii] > self.B[1][mac1_index]: mac1_index = ii
         return [mac0_index, mac1_index]
 
-# if a posithon(x, y) is out of the range of the map, bound it to a periodic position
+# if a position(x, y) is out of the range of the map, bound it to a periodic position
 def bound(pos):
     if (pos[0] >= size_row):
         pos[0] -= size_row
@@ -101,20 +113,22 @@ class Player():
             for each_nei in nei:
                 players_num_nei[each_nei.position[0], each_nei.position[1]] += 1
                 players[each_nei.position[0], each_nei.position[1]].nei = \
-                    np.append(players[each_nei.position[0], each_nei.position[1]].nei, [self.position])            
+                    np.append(players[each_nei.position[0], each_nei.position[1]].nei, [self.position])
+            self.num_nei = num_nei
         elif type_nei == 'm': # r(andom) m(oore) v(on)
-            self.num_nei = (2*num_nei + 1) ** 2 - 1
-            for nei_row in self.position[0] - num_nei + range(2*num_nei + 1):
-                for nei_col in self.position[1] - num_nei + range(2*num_nei + 1):
+            self.num_nei = num_nei
+            for nei_row in self.position[0] - m_num_nei + range(2*m_num_nei + 1):
+                for nei_col in self.position[1] - m_num_nei + range(2*m_num_nei + 1):
                     if nei_row != self.position[0] or nei_col != self.position[1]:
                         nei_pos = [nei_row, nei_col]
                         bound(nei_pos)
                         #print(self.position, nei_pos)
                         self.nei = np.append(self.nei, nei_pos)
         elif type_nei == 'v': # r(andom) m(oore) v(on)
-            for nei_row in self.position[0] - num_nei + range(2*num_nei + 1):
-                for nei_col in self.position[1] - num_nei +  np.abs(nei_row - self.position[0]) + \
-                    range(2*(num_nei - np.abs(nei_row - self.position[0])) + 1):
+            self.num_nei = num_nei
+            for nei_row in self.position[0] - v_num_nei + range(2*v_num_nei + 1):
+                for nei_col in self.position[1] - v_num_nei +  np.abs(nei_row - self.position[0]) + \
+                    range(2*(v_num_nei - np.abs(nei_row - self.position[0])) + 1):
                     if nei_row != self.position[0] or nei_col != self.position[1]:
                         nei_pos = [nei_row, nei_col]
                         bound(nei_pos)
@@ -159,7 +173,6 @@ f_c = [] # fraction of cooperations in a state
 
 if __name__ == '__main__':
     verbose = True
-    size_error()
     start_time = time.time()
     fc_table = np.ones([window_num, window_size])
     for window in range(window_num):
@@ -169,8 +182,11 @@ if __name__ == '__main__':
             state = generate_state(players)
             fc_table[window, gen] = np.sum(state) / size_row / size_col
             #part 2, each player update the reference of chunks according to current state, 8/s
-            update_mem = np.vectorize(Player.update_chunks_ref)
-            update_mem(players)
+            for row_no in range(size_row):
+                for col_no in range(size_col):
+                    players[row_no, col_no].update_chunks_ref()
+            #update_mem = np.vectorize(Player.update_chunks_ref)
+            #update_mem(players)
             if verbose and gen % 100 == 0:
                 duration = time.time() - start_time
                 expect_time = duration / (window * window_size + gen + 1) * (window_num * window_size)
@@ -179,8 +195,15 @@ if __name__ == '__main__':
     # plot the f_c
     fc_mean = fc_table.mean(axis = 1)
     fc_diff = np.insert(np.diff(fc_mean), 0, 1, axis = 0)
-    fc_dot_color = np.where(fc_diff < diff_tol, 'green', 'red')
-    plt.figure(figsize = (12, 8))
+    
+    fc_dot_color = np.where(np.abs(fc_diff) > -1, 'r', 'r')
+    ii = window_num - 1
+    while (np.abs(fc_diff[ii]) < diff_tol and ii >= 0):
+        fc_dot_color[ii] = 'g'
+        ii -= 1
+    #fc_dot_color = np.where(np.abs(fc_diff) < diff_tol, 'g', 'red')
+        
+    plt.figure(figsize = (10, 6))
     plt.plot(range(1, window_num + 1), fc_mean)
     plt.scatter(range(1, window_num + 1), fc_mean, color = fc_dot_color, s = 50)
     plt.xlabel('Generation Number(*{})'.format(window_size))
@@ -188,10 +211,12 @@ if __name__ == '__main__':
     plt.title('RSS_model(neighbor type:{})'.format(type_nei))
     
     # find asymptotically stable value (if exists)
-    if 'green' in fc_dot_color:
-        asym_val = np.mean(fc_mean[fc_diff < diff_tol])
-        plt.axhline(y = asym_val, color = 'green', ls="--")
+    if 'g' in fc_dot_color:
+        fc_dot_color[-1] = 'g'
+        asym_val = np.mean(fc_mean[fc_dot_color == 'g'])
+        plt.axhline(y = asym_val, color = 'g', ls="--")
         plt.title('RSS_model(neighbor type:{}, asymptotically stable value:{:.4f})'.format(type_nei, asym_val))
     
     plt.savefig('RSS_fc.png', dpi = 300)
+    plt.show()
 
