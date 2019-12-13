@@ -14,13 +14,17 @@ import time
 ## Hyper-parameters
 R, S, T, P = [3, 0, 5, 1] # rewards
 ref0 = 100 # init reference
-num_nei = 4 # number of neighboors
-type_nei = 'r' # r(andom) m(oore) v(on)
+num_nei = 2 # number of neighboors
+type_nei = 'v' # r(andom) m(oore) v(on)
 size_row, size_col = [20, 20] # size of the grid
 d =  0.5 # forgetting rate
 s = 0.25 # activation noise parameter
 num_generation = 1000 #int(20e4) # number of generations in total
 window_size = int(1e4) # number of generations in 1 window
+
+def size_error():
+    if type_nei != 'r' and (2*num_nei + 1 > size_row or 2*num_nei + 1 > size_col):
+        print('ERROR in \'get_neighbors\', map size is too small...')
 
 # chunk
 class Chunk():
@@ -63,6 +67,17 @@ class Chunks_ref():
         mac1_index = np.argmax(self.B[1])
         return [mac0_index, mac1_index]
 
+# if a posithon(x, y) is out of the range of the map, bound it to a periodic position
+def bound(pos):
+    if (pos[0] >= size_row):
+        pos[0] -= size_row
+    elif (pos[0] < 0):
+        pos[0] += size_row
+    if (pos[1] >= size_col):
+        pos[1] -= size_col
+    elif (pos[1] < 0):
+        pos[1] += size_col
+
 class Player():
     def __init__(self, pos_index):
         self.sum_payoff = 0
@@ -84,9 +99,23 @@ class Player():
                 players[each_nei.position[0], each_nei.position[1]].nei = \
                     np.append(players[each_nei.position[0], each_nei.position[1]].nei, [self.position])            
         elif type_nei == 'm': # r(andom) m(oore) v(on)
-            return 0
+            self.num_nei = (2*num_nei + 1) ** 2 - 1
+            for nei_row in self.position[0] - num_nei + range(2*num_nei + 1):
+                for nei_col in self.position[1] - num_nei + range(2*num_nei + 1):
+                    if nei_row != self.position[0] or nei_col != self.position[1]:
+                        nei_pos = [nei_row, nei_col]
+                        bound(nei_pos)
+                        #print(self.position, nei_pos)
+                        self.nei = np.append(self.nei, nei_pos)
         elif type_nei == 'v': # r(andom) m(oore) v(on)
-            return 0
+            for nei_row in self.position[0] - num_nei + range(2*num_nei + 1):
+                for nei_col in self.position[1] - num_nei +  np.abs(nei_row - self.position[0]) + \
+                    range(2*(num_nei - np.abs(nei_row - self.position[0])) + 1):
+                    if nei_row != self.position[0] or nei_col != self.position[1]:
+                        nei_pos = [nei_row, nei_col]
+                        bound(nei_pos)
+                        #print(self.position, nei_pos)
+                        self.nei = np.append(self.nei, nei_pos)
     # find the action with the larger probable payoff
     def act(self):
         mac = self.chunks_ref.most_active_chunk()
@@ -115,10 +144,10 @@ while (True):
         for row_no in range(size_row):
             for col_no in range(size_col):
                 players[row_no, col_no].get_neighbors()
-        print('Finished generating radom neighbors.')
+        print('Finished generating neighbors.')
         break
     except ValueError as e:
-        print('Failed to generate radom neighbors (', e, '), redo...')
+        print('Failed to generate neighbors (', e, '), redo...')
         continue
 
 state = np.zeros([size_row, size_col]) # is the player in this position cooperates
@@ -126,6 +155,7 @@ f_c = [] # fraction of cooperations in a state
 
 if __name__ == '__main__':
     verbose = True
+    size_error()
     start_time = time.time()
     for generation in range(num_generation):
         # part 1, each player acts according to the state of last generation, 125/s
